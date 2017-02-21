@@ -22,6 +22,11 @@ type Jenkins struct {
 	baseUrl string
 }
 
+type CrumbIssuer struct {
+	Crumb             string `json:"crumb"`
+	CrumbRequestField string `json:"crumbRequestField"`
+}
+
 func NewJenkins(auth *Auth, baseUrl string) *Jenkins {
 	return &Jenkins{
 		auth:    auth,
@@ -107,6 +112,15 @@ func (jenkins *Jenkins) getXml(path string, params url.Values, body interface{})
 }
 
 func (jenkins *Jenkins) post(path string, params url.Values, body interface{}) (err error) {
+
+	crumb, _ := jenkins.getCrumb()
+	if crumb.Crumb != "" {
+		if params == nil {
+			params = url.Values{}
+		}
+		params.Set(crumb.CrumbRequestField, crumb.Crumb)
+	}
+
 	requestUrl := jenkins.buildUrl(path, params)
 	req, err := http.NewRequest("POST", requestUrl, nil)
 	if err != nil {
@@ -125,6 +139,15 @@ func (jenkins *Jenkins) post(path string, params url.Values, body interface{}) (
 }
 func (jenkins *Jenkins) postXml(path string, params url.Values, xmlBody io.Reader, body interface{}) (err error) {
 	requestUrl := jenkins.baseUrl + path
+
+	crumb, _ := jenkins.getCrumb()
+	if crumb.Crumb != "" {
+		if params == nil {
+			params = url.Values{}
+		}
+		params.Set(crumb.CrumbRequestField, crumb.Crumb)
+	}
+
 	if params != nil {
 		queryString := params.Encode()
 		if queryString != "" {
@@ -156,6 +179,14 @@ func (jenkins *Jenkins) GetJobs() ([]Job, error) {
 	}{}
 	err := jenkins.get("", nil, &payload)
 	return payload.Jobs, err
+}
+
+// getCrumb returns a csrf crumb for post.
+func (jenkins *Jenkins) getCrumb() (CrumbIssuer, error) {
+	payload := CrumbIssuer{}
+	err := jenkins.get("/crumbIssuer", nil, &payload)
+
+	return payload, err
 }
 
 // GetJob returns a job which has specified name.
@@ -214,7 +245,7 @@ func (jenkins *Jenkins) CreateView(listView ListView) error {
 // Create a new build for this job.
 // Params can be nil.
 func (jenkins *Jenkins) Build(job Job, params url.Values) error {
-	if hasParams(job) {
+	if params != nil {
 		return jenkins.post(fmt.Sprintf("/job/%s/buildWithParameters", job.Name), params, nil)
 	} else {
 		return jenkins.post(fmt.Sprintf("/job/%s/build", job.Name), params, nil)
@@ -301,14 +332,4 @@ func (jenkins *Jenkins) GetComputers() ([]Computer, error) {
 func (jenkins *Jenkins) GetComputer(name string) (computer Computer, err error) {
 	err = jenkins.get(fmt.Sprintf("/computer/%s", name), nil, &computer)
 	return
-}
-
-// hasParams returns a boolean value indicating if the job is parameterized
-func hasParams(job Job) bool {
-	for _, action := range job.Actions {
-		if len(action.ParameterDefinitions) > 0 {
-			return true
-		}
-	}
-	return false
 }
